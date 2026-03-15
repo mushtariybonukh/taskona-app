@@ -316,9 +316,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       )}
       {mobile && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></div>
-          <div style={{ fontSize:12, color:C.muted }}>{fmtDate(TODAY())}</div>
-        </div>
+         <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:36, width:36, borderRadius:10 }} alt="Taskona"/><span style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
       )}
 
       {/* Stats */}
@@ -481,7 +479,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
   // ── DESKTOP NAV ───────────────────────────────────────────────────────────
   const DesktopNav = () => (
     <div style={{ background:"#0d0d2b", borderBottom:`1px solid #1a1a4a`, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:52, position:"sticky", top:0, zIndex:100 }}>
-      <div style={{ fontSize:18, fontWeight:800, letterSpacing:2, fontFamily:"Georgia,serif", color:C.white }}>TASKONA<span style={{ color:C.violet }}>.AI</span></div>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:32, width:32, borderRadius:8 }} alt="Taskona"/><span style={{ fontSize:18, fontWeight:800, letterSpacing:2, fontFamily:"Georgia,serif", color:C.white }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
       <nav style={{ display:"flex", gap:3 }}>
         {[["dash","Dashboard"],["week","This Week"],["add","+ Add Post"]].map(([k,l])=>(
           <button key={k} onClick={()=>setView(k)} style={{ padding:"6px 14px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:view===k?C.violet:"transparent", color:view===k?C.white:C.muted }}>
