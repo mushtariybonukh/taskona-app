@@ -306,7 +306,8 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       {!mobile && (
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
           <div>
-            <div style={{ fontSize:14, color:C.muted }}>{fmtDate(TODAY())}</div>
+            <div style={{ fontSize:24, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></div>
+            <div style={{ fontSize:12, color:C.muted }}>{fmtDate(TODAY())}</div>
           </div>
           <div style={{ display:"flex", gap:10 }}>
             <button onClick={()=>setView("add")} style={{ ...btn("primary"), padding:"9px 18px" }}>+ Add Post</button>
@@ -316,7 +317,9 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       )}
       {mobile && (
         <div style={{ marginBottom:20 }}>
-         <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:36, width:36, borderRadius:10 }} alt="Taskona"/><span style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:36, width:36, borderRadius:10 }} alt="Taskona"/><span style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
+          <div style={{ fontSize:12, color:C.muted }}>{fmtDate(TODAY())}</div>
+        </div>
       )}
 
       {/* Stats */}
