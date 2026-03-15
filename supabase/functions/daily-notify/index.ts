@@ -1,7 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = "https://ukrfnapkypperwvmgiie.supabase.co";
-const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_KEY") ?? "";
+const SUPABASE_KEY = Deno.env.get("SERVICE_KEY") ?? "";
 const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 const CHAT_ID = Deno.env.get("TELEGRAM_CHAT_ID") ?? "";
 
@@ -53,5 +53,8 @@ Deno.serve(async () => {
 
   await sendTelegram(message);
 
-  return new Response(JSON.stringify({ ok: true, today, sent: tasks?.length ?? 0 }));
+  return new Response(
+    JSON.stringify({ ok: true, today, tasks_today: tasks?.length ?? 0, burning: burning?.length ?? 0 }),
+    { headers: { "Content-Type": "application/json" } }
+  );
 });
