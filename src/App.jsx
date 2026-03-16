@@ -5,7 +5,6 @@ const SUPABASE_URL = "https://ukrfnapkypperwvmgiie.supabase.co";
 const SUPABASE_KEY = "sb_publishable_PSjKF-xddCU--82YhO4gIQ_BaH3ilc-";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── GET USER ID ──────────────────────────────────────────────────────────────
 function getUserId() {
   try {
     const tg = window.Telegram?.WebApp?.initDataUnsafe?.user;
@@ -16,10 +15,8 @@ function getUserId() {
   return uid;
 }
 
-// ── DETECT MOBILE ────────────────────────────────────────────────────────────
 const isMobile = () => window.innerWidth < 768 || !!window.Telegram?.WebApp?.initData;
 
-// ── HELPERS ──────────────────────────────────────────────────────────────────
 const TODAY = () => new Date().toISOString().split("T")[0];
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().split("T")[0]; }
 function daysDiff(d) { return Math.ceil((new Date(d) - new Date(TODAY())) / 86400000); }
@@ -31,6 +28,12 @@ const CTYPES = ["Graphic","Video","Carousel","Reel","Story","Text post"];
 const STATUSES = { scheduled:"Scheduled", in_progress:"In Progress", posted:"Posted ✓", missed:"Missed" };
 const ROLE_COLORS = { Designer:["#9d3eff22","#bb77ff"], Editor:["#3e9dff22","#77bbff"], PM:["#3eff9d22","#77ffbb"], Client:["#ff9d3e22","#ffbb77"] };
 const DEFAULT_BUFFERS = { Graphic:2, Video:5, Carousel:2, Reel:5, Story:1, "Text post":1 };
+const CP_STATUSES = {
+  draft:    { label:"Draft",            color:"#9d97ff", bg:"#9d97ff22" },
+  sent:     { label:"Sent to Client",   color:"#c4956a", bg:"#c4956a22" },
+  approved: { label:"Approved ✓",       color:"#00C853", bg:"#00C85322" },
+  active:   { label:"In Tasks",         color:"#6c63ff", bg:"#6c63ff22" }
+};
 
 function urgency(task) {
   const d = daysDiff(task.due_date);
@@ -40,7 +43,6 @@ function urgency(task) {
   return "normal";
 }
 
-// ── PARSE CSV ────────────────────────────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length < 2) return [];
@@ -70,6 +72,15 @@ export default function Taskona() {
   const [showSettings, setShowSettings] = useState(false);
   const [editBuffers, setEditBuffers] = useState(DEFAULT_BUFFERS);
 
+  // ── CONTENT PLAN STATE ────────────────────────────────────────────────────
+  const [contentPlans, setContentPlans] = useState([]);
+  const [cpStep, setCpStep] = useState("list"); // list | brief | generating | ideas | detail
+  const [cpBrief, setCpBrief] = useState({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30 });
+  const [cpIdeas, setCpIdeas] = useState([]);
+  const [cpLoading, setCpLoading] = useState(false);
+  const [activePlan, setActivePlan] = useState(null);
+  const [editingIdea, setEditingIdea] = useState(null);
+
   useEffect(() => {
     loadData();
     const handleResize = () => setMobile(isMobile());
@@ -81,9 +92,11 @@ export default function Taskona() {
     const { data: p } = await supabase.from("posts").select("*").eq("user_id", userId).order("pub_date");
     const { data: t } = await supabase.from("tasks").select("*").eq("user_id", userId).order("due_date");
     const { data: b } = await supabase.from("buffers").select("*").eq("id", 1).single();
+    const { data: cp } = await supabase.from("content_plans").select("*").eq("user_id", userId).order("created_at", { ascending:false });
     if (p) setPosts(p);
     if (t) setTasks(t);
     if (b?.settings) { setBuffers(b.settings); setEditBuffers(b.settings); }
+    if (cp) setContentPlans(cp);
   };
 
   const notify = (msg, err) => { setToast({msg,err}); setTimeout(()=>setToast(null),4000); };
@@ -130,6 +143,94 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
     }
   };
 
+  // ── GENERATE CONTENT PLAN VIA AI ──────────────────────────────────────────
+  const generateContentPlan = async () => {
+    if (!cpBrief.niche) return notify("Enter niche/business", true);
+    setCpLoading(true);
+    setCpStep("generating");
+    try {
+      const startDate = addDays(TODAY(), 1);
+      const endDate = addDays(TODAY(), cpBrief.periodDays);
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          model:"claude-sonnet-4-20250514", max_tokens:2000,
+          messages:[{ role:"user", content:`You are an expert SMM content strategist. Create a content plan.
+Niche/Business: ${cpBrief.niche}
+Goals: ${cpBrief.goals || "increase engagement and followers"}
+Platform: ${cpBrief.platform}
+Number of posts: ${cpBrief.numPosts}
+Period: ${startDate} to ${endDate}
+Today: ${TODAY()}
+Generate exactly ${cpBrief.numPosts} posts spread across the period. Mix content types strategically.
+RESPOND ONLY WITH VALID JSON ARRAY, no other text, no markdown:
+[{"title":"...","type":"Graphic","date":"YYYY-MM-DD","caption":"short caption idea 1-2 sentences","goal":"awareness|engagement|sales|trust"}]` }]
+        })
+      });
+      const data = await res.json();
+      let text = data.content[0].text.trim().replace(/```json|```/g,"").trim();
+      const parsed = JSON.parse(text);
+      setCpIdeas(parsed.map((idea,i) => ({ ...idea, id:`idea_${i}`, platform:cpBrief.platform })));
+      setCpStep("ideas");
+    } catch {
+      notify("Generation failed, try again", true);
+      setCpStep("brief");
+    }
+    setCpLoading(false);
+  };
+
+  // ── SAVE CONTENT PLAN ─────────────────────────────────────────────────────
+  const saveContentPlan = async (status = "draft") => {
+    const planId = Date.now().toString();
+    const plan = { id:planId, user_id:userId, niche:cpBrief.niche, goals:cpBrief.goals, platform:cpBrief.platform, posts:cpIdeas, status, created_at:TODAY() };
+    await supabase.from("content_plans").insert(plan);
+    setContentPlans(cp => [plan, ...cp]);
+    notify(status==="sent" ? "Downloaded & saved as Sent ✓" : "Draft saved ✓");
+    setCpStep("list"); setCpIdeas([]);
+    setCpBrief({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30 });
+    return plan;
+  };
+
+  // ── DOWNLOAD PLAN AS CSV ──────────────────────────────────────────────────
+  const downloadPlan = (plan, ideas) => {
+    const rows = ideas || plan.posts || [];
+    let csv = "Title,Type,Platform,Date,Caption,Goal\n";
+    rows.forEach(p => { csv += `"${p.title}","${p.type}","${p.platform||plan.platform}","${p.date}","${(p.caption||"").replace(/"/g,"'")}","${p.goal}"\n`; });
+    const blob = new Blob([csv], { type:"text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `content-plan-${(plan.niche||"taskona").replace(/\s+/g,"-")}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const updatePlanStatus = async (planId, status) => {
+    await supabase.from("content_plans").update({ status }).eq("id", planId);
+    setContentPlans(cp => cp.map(p => p.id===planId ? {...p,status} : p));
+    setActivePlan(ap => ap?.id===planId ? {...ap,status} : ap);
+  };
+
+  // ── APPROVE & CONVERT TO TASKS ────────────────────────────────────────────
+  const approveAndConvert = async (plan) => {
+    const planPosts = plan.posts || [];
+    notify(`Converting ${planPosts.length} posts to tasks...`);
+    const allPosts = [], allTasks = [];
+    for (let i = 0; i < planPosts.length; i++) {
+      const idea = planPosts[i];
+      const postId = `${plan.id}_${i}`;
+      const buf = getBuffer(idea.type || "Graphic");
+      const newPost = { id:postId, title:idea.title, content_type:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pub_date:idea.date, client:"", description:idea.caption||"", created_at:TODAY(), analytics:null, user_id:userId };
+      const newTasks = await generateTasks({ title:idea.title, contentType:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pubDate:idea.date, client:"" }, postId, buf);
+      allPosts.push(newPost); allTasks.push(...newTasks);
+    }
+    await supabase.from("posts").insert(allPosts);
+    await supabase.from("tasks").insert(allTasks);
+    setPosts(p => [...p, ...allPosts]);
+    setTasks(t => [...t, ...allTasks]);
+    await updatePlanStatus(plan.id, "active");
+    notify(`✓ ${allPosts.length} posts added to tasks!`);
+    setView("dash");
+  };
+
   // ── ADD SINGLE POST ───────────────────────────────────────────────────────
   const addPost = async () => {
     if (!form.title||!form.pubDate) return notify("Title and date required", true);
@@ -151,8 +252,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
   const importFromFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    setImportLoading(true);
-    setImportProgress("Reading file...");
+    setImportLoading(true); setImportProgress("Reading file...");
     try {
       const text = await file.text();
       const rows = parseCSV(text);
@@ -164,31 +264,18 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
         setImportProgress(`Processing ${i+1} of ${rows.length}: ${row.title}`);
         const postId = `${Date.now()}_${i}`;
         const buf = getBuffer(row.type || "Graphic");
-        const newPost = {
-          id: postId, title: row.title,
-          content_type: row.type || "Graphic",
-          platform: row.platform || "Instagram",
-          pub_date: row.date, client: row.client || "",
-          description: row.description || "",
-          created_at: TODAY(), analytics: null, user_id: userId
-        };
+        const newPost = { id:postId, title:row.title, content_type:row.type||"Graphic", platform:row.platform||"Instagram", pub_date:row.date, client:row.client||"", description:row.description||"", created_at:TODAY(), analytics:null, user_id:userId };
         const newTasks = await generateTasks({ title:row.title, contentType:row.type||"Graphic", platform:row.platform||"Instagram", pubDate:row.date, client:row.client||"" }, postId, buf);
-        allPosts.push(newPost);
-        allTasks.push(...newTasks);
+        allPosts.push(newPost); allTasks.push(...newTasks);
         await new Promise(r => setTimeout(r, 300));
       }
       await supabase.from("posts").insert(allPosts);
       await supabase.from("tasks").insert(allTasks);
-      setPosts(p => [...p, ...allPosts]);
-      setTasks(t => [...t, ...allTasks]);
+      setPosts(p => [...p, ...allPosts]); setTasks(t => [...t, ...allTasks]);
       notify(`✓ ${allPosts.length} posts imported, ${allTasks.length} tasks generated!`);
       setView("dash");
-    } catch (err) {
-      notify("Import failed. Check file format.", true);
-    }
-    setImportLoading(false);
-    setImportProgress("");
-    e.target.value = "";
+    } catch { notify("Import failed. Check file format.", true); }
+    setImportLoading(false); setImportProgress(""); e.target.value = "";
   };
 
   const updateStatus = async (taskId, status) => {
@@ -217,10 +304,8 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
   const weekTasks = tasks.filter(t=>{ const d=daysDiff(t.due_date); return d>=-1&&d<=7&&t.status!=="posted"; }).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
 
   const C = { bg:"#080818", card:"#0f0f2e", border:"#1a1a4a", violet:"#6c63ff", violet2:"#9d97ff", green:"#00C853", red:"#ef5350", gold:"#c4956a", text:"#e0e0f0", muted:"#666688", white:"#ffffff" };
-
   const selPost = sel ? posts.find(p=>p.id===sel.id) : null;
 
-  // ── SHARED: TASK CARD ─────────────────────────────────────────────────────
   const TaskCard = ({t, onClick}) => {
     const urg = urgency(t);
     return (
@@ -236,8 +321,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
           <span style={{ fontSize:11, color:urg==="burning"?C.red:urg==="today"?C.violet:C.muted }}>
             {urg==="burning"?`🔥 ${Math.abs(daysDiff(t.due_date))}d overdue`:urg==="today"?"📅 Due today":`📅 ${fmtShort(t.due_date)}`}
           </span>
-          <select value={t.status} onChange={e=>{e.stopPropagation();updateStatus(t.id,e.target.value);}}
-            style={{ background:"#1a1a3a", border:`1px solid #2a2a5a`, color:C.violet2, borderRadius:8, padding:"4px 8px", fontSize:11, cursor:"pointer" }}>
+          <select value={t.status} onChange={e=>{e.stopPropagation();updateStatus(t.id,e.target.value);}} style={{ background:"#1a1a3a", border:`1px solid #2a2a5a`, color:C.violet2, borderRadius:8, padding:"4px 8px", fontSize:11, cursor:"pointer" }}>
             {Object.entries(STATUSES).map(([k,v])=><option key={k} value={k}>{v}</option>)}
           </select>
         </div>
@@ -245,35 +329,28 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
     );
   };
 
-  // ── INPUT STYLE ───────────────────────────────────────────────────────────
   const inp = { width:"100%", background:"#0d0d2b", border:`1px solid #2a2a55`, borderRadius:10, padding:mobile?"12px 14px":"9px 12px", color:C.text, fontSize:mobile?15:13, outline:"none", boxSizing:"border-box" };
   const sel_style = { ...inp };
-  const btn = (v) => ({ padding:mobile?"14px":"9px 18px", borderRadius:mobile?12:8, border:"none", cursor:"pointer", fontWeight:800, fontSize:mobile?15:13, background:v==="primary"?C.violet:v==="danger"?"#2a0808":v==="green"?"#0a2a1a":"#1a1a3a", color:v==="primary"?C.white:v==="danger"?C.red:v==="green"?C.green:"#aaaacc" });
+  const btn = (v) => ({ padding:mobile?"14px":"9px 18px", borderRadius:mobile?12:8, border:"none", cursor:"pointer", fontWeight:800, fontSize:mobile?15:13, background:v==="primary"?C.violet:v==="danger"?"#2a0808":v==="green"?"#0a2a1a":v==="gold"?"#2a1a08":"#1a1a3a", color:v==="primary"?C.white:v==="danger"?C.red:v==="green"?C.green:v==="gold"?C.gold:"#aaaacc" });
 
-  // ── IMPORT SECTION ────────────────────────────────────────────────────────
   const ImportSection = () => (
     <div style={{ background:"#0a0a1e", border:`1px solid ${C.violet}44`, borderRadius:12, padding:16, marginBottom:16 }}>
       <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:8, textTransform:"uppercase" }}>📥 Import Monthly Plan</div>
-      <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>
-        Upload a CSV file with columns: <span style={{ color:C.violet2 }}>Title, Type, Platform, Date, Client</span>
-      </div>
+      <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>Upload a CSV: <span style={{ color:C.violet2 }}>Title, Type, Platform, Date, Client</span></div>
       {importLoading ? (
         <div style={{ color:C.violet2, fontSize:13, padding:"10px 0" }}>⚡ {importProgress}</div>
       ) : (
         <label style={{ display:"block", cursor:"pointer" }}>
-          <div style={{ ...btn("primary"), textAlign:"center", borderRadius:10 }}>
-            📂 Choose CSV File
-          </div>
+          <div style={{ ...btn("primary"), textAlign:"center", borderRadius:10 }}>📂 Choose CSV File</div>
           <input type="file" accept=".csv,.txt" onChange={importFromFile} style={{ display:"none" }}/>
         </label>
       )}
       <div style={{ fontSize:11, color:"#444466", marginTop:8 }}>
-        💡 <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noreferrer" style={{ color:"#555577" }}>Create in Google Sheets</a> → File → Download → CSV
+        💡 <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noreferrer" style={{ color:"#555577" }}>Google Sheets</a> → File → Download → CSV
       </div>
     </div>
   );
 
-  // ── SETTINGS MODAL ────────────────────────────────────────────────────────
   const SettingsModal = () => (
     <div style={{ position:"fixed", inset:0, background:"#00000099", zIndex:200, display:"flex", alignItems:mobile?"flex-end":"center", justifyContent:"center" }}>
       <div style={{ background:"#0d0d2b", borderRadius:mobile?"20px 20px 0 0":"14px", padding:24, width:mobile?"100%":"420px", maxHeight:"80vh", overflowY:"auto" }}>
@@ -317,12 +394,13 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       )}
       {mobile && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:36, width:36, borderRadius:10 }} alt="Taskona"/><span style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <img src="/logo.png" style={{ height:36, width:36, borderRadius:10 }} alt="Taskona"/>
+            <span style={{ fontSize:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span>
+          </div>
           <div style={{ fontSize:12, color:C.muted }}>{fmtDate(TODAY())}</div>
         </div>
       )}
-
-      {/* Stats */}
       <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr 1fr":"repeat(4,1fr)", gap:10, marginBottom:16 }}>
         {[{n:posts.length,l:"Total Posts",c:C.violet2,icon:"📋"},{n:todayTasks.length,l:"Due Today",c:todayTasks.length?C.violet:C.green,icon:"📅"},{n:burning.length,l:"Burning",c:burning.length?C.red:C.green,icon:"🔥"},{n:weekTasks.length,l:"This Week",c:C.gold,icon:"📆"}].map((s,i)=>(
           <div key={i} style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px" }}>
@@ -331,9 +409,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
           </div>
         ))}
       </div>
-
       <div style={{ display:mobile?"block":"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-        {/* Left col */}
         <div>
           <ImportSection/>
           {burning.length>0&&<>
@@ -345,14 +421,10 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
             ? <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:12, padding:16, color:C.green, fontSize:13, marginBottom:16 }}>✓ Nothing due today</div>
             : todayTasks.map(t=><TaskCard key={t.id} t={t} onClick={()=>{setSel(posts.find(p=>p.id===t.post_id));setAnalytics(posts.find(p=>p.id===t.post_id)?.analytics||{});setView("detail");}}/>)}
         </div>
-
-        {/* Right col / Posts */}
         <div>
           <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:10, textTransform:"uppercase" }}>All Posts ({posts.length})</div>
           {posts.length===0
-            ? <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:12, padding:20, color:C.muted, fontSize:13, textAlign:"center" }}>
-                No posts yet.<br/>Import a plan or tap + to add a post.
-              </div>
+            ? <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:12, padding:20, color:C.muted, fontSize:13, textAlign:"center" }}>No posts yet.<br/>Import a plan or tap + to add a post.</div>
             : posts.sort((a,b)=>new Date(a.pub_date)-new Date(b.pub_date)).map(p=>{
                 const pt=tasks.filter(t=>t.post_id===p.id), done=pt.filter(t=>t.status==="posted").length, diff=daysDiff(p.pub_date), hasBurning=pt.some(t=>urgency(t)==="burning");
                 return <div key={p.id} onClick={()=>{setSel(p);setAnalytics(p.analytics||{});setView("detail");}} style={{ background:"#0f0f2e", border:`1px solid ${hasBurning?"#3a1010":"#1a1a4a"}`, borderRadius:14, padding:"14px 16px", marginBottom:10, cursor:"pointer" }}>
@@ -366,7 +438,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{done}/{pt.length} done</div>
                     </div>
                   </div>
-                </div>
+                </div>;
               })}
         </div>
       </div>
@@ -479,12 +551,300 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
     );
   };
 
+  // ── CONTENT PLAN VIEW ─────────────────────────────────────────────────────
+  const ContentPlanView = () => {
+
+    if (cpStep === "list") return (
+      <div style={{ padding:mobile?"16px 16px 80px":"24px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+          <div style={{ fontSize:mobile?18:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>Content Plans</div>
+          <button onClick={()=>setCpStep("brief")} style={{ ...btn("primary"), padding:"8px 16px", fontSize:13 }}>+ New Plan</button>
+        </div>
+        {contentPlans.length === 0 ? (
+          <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:32, textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>📋</div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:8 }}>No content plans yet</div>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>AI will brainstorm post ideas, you edit → send to client → approve → convert to tasks</div>
+            <button onClick={()=>setCpStep("brief")} style={{ ...btn("primary") }}>Create First Plan</button>
+          </div>
+        ) : contentPlans.map(plan => {
+          const st = CP_STATUSES[plan.status] || CP_STATUSES.draft;
+          return (
+            <div key={plan.id} onClick={()=>{ setActivePlan(plan); setCpStep("detail"); }} style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px", marginBottom:10, cursor:"pointer" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:C.text }}>{plan.niche}</div>
+                  <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>{plan.platform} · {plan.posts?.length||0} posts · {fmtDate(plan.created_at)}</div>
+                </div>
+                <span style={{ fontSize:11, padding:"4px 10px", borderRadius:20, background:st.bg, color:st.color, fontWeight:700, flexShrink:0 }}>{st.label}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+
+    if (cpStep === "brief") return (
+      <div style={{ padding:mobile?"16px 16px 80px":"24px", maxWidth:mobile?"100%":560 }}>
+        <button onClick={()=>setCpStep("list")} style={{ background:"none", border:"none", color:C.violet, fontSize:13, fontWeight:700, cursor:"pointer", padding:"0 0 16px" }}>← Back</button>
+        <div style={{ fontSize:mobile?18:20, fontWeight:800, color:C.white, fontFamily:"Georgia,serif", marginBottom:4 }}>New Content Plan</div>
+        <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>AI brainstorms → you edit → send to client → approve → convert to tasks</div>
+        <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Niche / Business *</div>
+            <input style={inp} placeholder="e.g. Fitness studio in Tashkent" value={cpBrief.niche} onChange={e=>setCpBrief({...cpBrief,niche:e.target.value})}/>
+          </div>
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Goals</div>
+            <input style={inp} placeholder="e.g. increase followers, drive bookings" value={cpBrief.goals} onChange={e=>setCpBrief({...cpBrief,goals:e.target.value})}/>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div>
+              <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Platform</div>
+              <select style={sel_style} value={cpBrief.platform} onChange={e=>setCpBrief({...cpBrief,platform:e.target.value})}>
+                {PLATFORMS.map(p=><option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Number of Posts</div>
+              <select style={sel_style} value={cpBrief.numPosts} onChange={e=>setCpBrief({...cpBrief,numPosts:+e.target.value})}>
+                {[5,8,10,12,15,20].map(n=><option key={n} value={n}>{n} posts</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Period</div>
+            <select style={sel_style} value={cpBrief.periodDays} onChange={e=>setCpBrief({...cpBrief,periodDays:+e.target.value})}>
+              {[14,21,30,60].map(n=><option key={n} value={n}>{n} days</option>)}
+            </select>
+          </div>
+          <button onClick={generateContentPlan} disabled={cpLoading} style={{ ...btn("primary"), width:"100%" }}>
+            ✦ Generate with AI
+          </button>
+        </div>
+      </div>
+    );
+
+    if (cpStep === "generating") return (
+      <div style={{ padding:"60px 24px", textAlign:"center" }}>
+        <div style={{ fontSize:48, marginBottom:16 }}>🤖</div>
+        <div style={{ fontSize:18, fontWeight:800, color:C.white, marginBottom:8 }}>AI is brainstorming...</div>
+        <div style={{ fontSize:13, color:C.muted }}>Generating {cpBrief.numPosts} post ideas for<br/><span style={{ color:C.violet2 }}>{cpBrief.niche}</span></div>
+        <div style={{ marginTop:28, display:"flex", justifyContent:"center", gap:8 }}>
+          {[0,1,2].map(i=><div key={i} style={{ width:10, height:10, borderRadius:"50%", background:C.violet, opacity:0.3+(i*0.35) }}/>)}
+        </div>
+      </div>
+    );
+
+    if (cpStep === "ideas") return (
+      <div style={{ padding:mobile?"16px 16px 80px":"24px" }}>
+        <button onClick={()=>setCpStep("brief")} style={{ background:"none", border:"none", color:C.violet, fontSize:13, fontWeight:700, cursor:"pointer", padding:"0 0 8px" }}>← Back</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+          <div>
+            <div style={{ fontSize:mobile?16:18, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>{cpBrief.niche}</div>
+            <div style={{ fontSize:12, color:C.muted }}>{cpIdeas.length} posts · {cpBrief.platform}</div>
+          </div>
+        </div>
+        <div style={{ background:"#0a0a1e", border:`1px solid #2a2a45`, borderRadius:12, padding:"10px 14px", marginBottom:14, fontSize:12, color:C.muted }}>
+          💡 Tap any post to edit or delete · When ready — download & send to client
+        </div>
+        <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
+          <button onClick={()=>{ const tmp={id:"tmp",niche:cpBrief.niche,platform:cpBrief.platform,posts:cpIdeas}; downloadPlan(tmp); saveContentPlan("sent"); }} style={{ ...btn("gold"), flex:1, minWidth:140 }}>📥 Download & Send to Client</button>
+          <button onClick={()=>saveContentPlan("draft")} style={{ ...btn(), flex:1, minWidth:100 }}>💾 Save Draft</button>
+        </div>
+        {cpIdeas.map((idea, i) => (
+          editingIdea === i ? (
+            <div key={i} style={{ background:"#0d0d2b", border:`2px solid ${C.violet}`, borderRadius:14, padding:16, marginBottom:10 }}>
+              <div style={{ fontSize:11, color:C.violet, fontWeight:700, marginBottom:8 }}>EDITING POST {i+1}</div>
+              <input style={{ ...inp, marginBottom:10 }} placeholder="Title" value={idea.title} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],title:e.target.value}; setCpIdeas(n); }}/>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                <select style={sel_style} value={idea.type} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],type:e.target.value}; setCpIdeas(n); }}>{CTYPES.map(t=><option key={t}>{t}</option>)}</select>
+                <input type="date" style={inp} value={idea.date} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],date:e.target.value}; setCpIdeas(n); }}/>
+              </div>
+              <textarea style={{ ...inp, resize:"vertical", minHeight:60, marginBottom:10 }} placeholder="Caption idea" value={idea.caption} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],caption:e.target.value}; setCpIdeas(n); }}/>
+              <div style={{ display:"flex", gap:8 }}>
+                <button onClick={()=>setEditingIdea(null)} style={{ ...btn("primary"), flex:1, padding:"10px" }}>✓ Done</button>
+                <button onClick={()=>{ setCpIdeas(cpIdeas.filter((_,j)=>j!==i)); setEditingIdea(null); }} style={{ ...btn("danger"), padding:"10px 16px" }}>🗑</button>
+              </div>
+            </div>
+          ) : (
+            <div key={i} onClick={()=>setEditingIdea(i)} style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:12, padding:"12px 14px", marginBottom:8, cursor:"pointer" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:C.text, flex:1, marginRight:8 }}>{i+1}. {idea.title}</div>
+                <div style={{ display:"flex", gap:5, flexShrink:0 }}>
+                  <span style={{ fontSize:10, padding:"2px 7px", borderRadius:6, background:"#1a1a3a", color:C.violet2 }}>{idea.type}</span>
+                  <span style={{ fontSize:10, padding:"2px 7px", borderRadius:6, background:idea.goal==="sales"?"#2a0a0a":idea.goal==="engagement"?"#0a1020":"#0a1a0a", color:idea.goal==="sales"?C.red:idea.goal==="engagement"?C.violet2:C.green }}>{idea.goal}</span>
+                </div>
+              </div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>📅 {fmtDate(idea.date)}</div>
+              <div style={{ fontSize:11, color:"#888899" }}>{idea.caption}</div>
+            </div>
+          )
+        ))}
+      </div>
+    );
+
+    if (cpStep === "detail" && activePlan) {
+      const st = CP_STATUSES[activePlan.status] || CP_STATUSES.draft;
+      return (
+        <div style={{ padding:mobile?"16px 16px 80px":"24px" }}>
+          <button onClick={()=>{ setActivePlan(null); setCpStep("list"); }} style={{ background:"none", border:"none", color:C.violet, fontSize:13, fontWeight:700, cursor:"pointer", padding:"0 0 12px" }}>← Back</button>
+          <div style={{ background:"#0f0f2e", border:`1px solid #2a2a5a`, borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontSize:mobile?16:18, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>{activePlan.niche}</div>
+                <div style={{ fontSize:12, color:C.muted, marginTop:3 }}>{activePlan.platform} · {activePlan.posts?.length||0} posts · {fmtDate(activePlan.created_at)}</div>
+              </div>
+              <span style={{ fontSize:11, padding:"4px 10px", borderRadius:20, background:st.bg, color:st.color, fontWeight:700 }}>{st.label}</span>
+            </div>
+          </div>
+
+          {/* Status flow */}
+          <div style={{ display:"flex", gap:8, marginBottom:16, flexWrap:"wrap" }}>
+            {(activePlan.status==="draft"||activePlan.status==="sent") && (
+              <button onClick={()=>downloadPlan(activePlan)} style={{ ...btn("gold"), flex:1 }}>📥 Download CSV</button>
+            )}
+            {activePlan.status==="draft" && (
+              <button onClick={()=>updatePlanStatus(activePlan.id,"sent")} style={{ ...btn(), flex:1 }}>📤 Mark as Sent</button>
+            )}
+            {activePlan.status==="sent" && (
+              <button onClick={()=>updatePlanStatus(activePlan.id,"approved")} style={{ ...btn("green"), flex:1 }}>✓ Client Approved</button>
+            )}
+            {activePlan.status==="sent" && (
+              <button onClick={()=>{ setCpIdeas(activePlan.posts||[]); setCpStep("ideas"); }} style={{ ...btn(), flex:1 }}>✏️ Edit & Resend</button>
+            )}
+            {activePlan.status==="approved" && (
+              <button onClick={()=>approveAndConvert(activePlan)} style={{ ...btn("primary"), flex:1 }}>🚀 Send to Tasks</button>
+            )}
+            {activePlan.status==="approved" && (
+              <button onClick={()=>{ setCpIdeas(activePlan.posts||[]); setCpStep("ideas"); }} style={{ ...btn(), flex:1 }}>✏️ Edit First</button>
+            )}
+          </div>
+
+          {/* Flow indicator */}
+          <div style={{ background:"#0a0a1a", borderRadius:10, padding:"10px 14px", marginBottom:16, display:"flex", alignItems:"center", gap:8, overflowX:"auto" }}>
+            {["draft","sent","approved","active"].map((s,i)=>{
+              const isCurrent = activePlan.status===s;
+              const isPast = ["draft","sent","approved","active"].indexOf(activePlan.status) > i;
+              const ss = CP_STATUSES[s];
+              return (
+                <div key={s} style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+                  <span style={{ fontSize:11, fontWeight:isCurrent?800:400, color:isCurrent?ss.color:isPast?"#444455":"#2a2a4a" }}>{ss.label}</span>
+                  {i<3&&<span style={{ color:"#2a2a4a", fontSize:12 }}>→</span>}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:10, textTransform:"uppercase" }}>Posts ({activePlan.posts?.length||0})</div>
+          {(activePlan.posts||[]).map((idea,i) => (
+            <div key={i} style={{ background:"#0a0a1e", border:`1px solid #181838`, borderRadius:12, padding:"12px 14px", marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:C.text, flex:1, marginRight:8 }}>{i+1}. {idea.title}</div>
+                <span style={{ fontSize:10, padding:"2px 7px", borderRadius:6, background:"#1a1a3a", color:C.violet2, flexShrink:0 }}>{idea.type}</span>
+              </div>
+              <div style={{ fontSize:11, color:C.muted, marginBottom:3 }}>📅 {fmtDate(idea.date)}</div>
+              <div style={{ fontSize:11, color:"#888899" }}>{idea.caption}</div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  // ── ER ANALYTICS VIEW ─────────────────────────────────────────────────────
+  const ERAnalytics = () => {
+    const postsWithER = posts.filter(p=>p.analytics?.er).sort((a,b)=>+b.analytics.er-(+a.analytics.er));
+    const postsWithoutER = posts.filter(p=>!p.analytics?.er);
+    const avgER = postsWithER.length ? (postsWithER.reduce((s,p)=>s+(+p.analytics.er),0)/postsWithER.length).toFixed(2) : null;
+    const bestPost = postsWithER[0];
+    const maxER = +(postsWithER[0]?.analytics?.er||1);
+
+    return (
+      <div style={{ padding:mobile?"16px 16px 80px":"24px" }}>
+        <div style={{ fontSize:mobile?18:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif", marginBottom:20 }}>ER Analytics</div>
+
+        {postsWithER.length === 0 ? (
+          <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:32, textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>📊</div>
+            <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:8 }}>No ER data yet</div>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>Open any post → save analytics (views, likes, comments) → ER appears here automatically</div>
+            <button onClick={()=>setView("dash")} style={{ ...btn("primary") }}>Go to Posts</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr 1fr":"repeat(3,1fr)", gap:10, marginBottom:20 }}>
+              <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px" }}>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>📊 Avg ER</div>
+                <div style={{ fontSize:28, fontWeight:800, color:C.violet, fontFamily:"Georgia,serif" }}>{avgER}%</div>
+                <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>Good: 3–6%</div>
+              </div>
+              <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px" }}>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>🏆 Best Post</div>
+                <div style={{ fontSize:24, fontWeight:800, color:C.green, fontFamily:"Georgia,serif" }}>{bestPost?.analytics?.er}%</div>
+                <div style={{ fontSize:10, color:C.muted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{bestPost?.title}</div>
+              </div>
+              <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px" }}>
+                <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>📋 Tracked</div>
+                <div style={{ fontSize:28, fontWeight:800, color:C.gold, fontFamily:"Georgia,serif" }}>{postsWithER.length}<span style={{ fontSize:16, color:C.muted }}>/{posts.length}</span></div>
+                <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>posts with data</div>
+              </div>
+            </div>
+
+            <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:12, textTransform:"uppercase" }}>ER by Post</div>
+            <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:16, marginBottom:20 }}>
+              {postsWithER.map((p,i) => {
+                const er = +p.analytics.er;
+                const pct = Math.min(100,(er/maxER)*100);
+                const col = er>=5?C.green:er>=2?C.gold:C.red;
+                return (
+                  <div key={p.id} onClick={()=>{setSel(p);setAnalytics(p.analytics||{});setView("detail");}} style={{ marginBottom:i<postsWithER.length-1?14:0, cursor:"pointer" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:5 }}>
+                      <div style={{ fontSize:12, color:C.text, flex:1, marginRight:8, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.title}</div>
+                      <div style={{ fontSize:14, fontWeight:800, color:col, flexShrink:0 }}>{er}%</div>
+                    </div>
+                    <div style={{ background:"#1a1a3a", borderRadius:6, height:8, overflow:"hidden" }}>
+                      <div style={{ width:`${pct}%`, height:"100%", background:`linear-gradient(90deg, ${col}99, ${col})`, borderRadius:6 }}/>
+                    </div>
+                    <div style={{ fontSize:10, color:C.muted, marginTop:4 }}>
+                      {p.platform} · {fmtDate(p.pub_date)} · 👁 {(+p.analytics.views||0).toLocaleString()} · ❤️ {(+p.analytics.likes||0).toLocaleString()} · 💬 {(+p.analytics.comments||0).toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {postsWithoutER.length > 0 && (
+              <>
+                <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.muted, marginBottom:10, textTransform:"uppercase" }}>Not Tracked ({postsWithoutER.length})</div>
+                {postsWithoutER.slice(0,6).map(p => (
+                  <div key={p.id} onClick={()=>{setSel(p);setAnalytics(p.analytics||{});setView("detail");}} style={{ background:"#0a0a1a", border:`1px solid #141428`, borderRadius:12, padding:"10px 14px", marginBottom:8, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <div>
+                      <div style={{ fontSize:13, color:"#888899" }}>{p.title}</div>
+                      <div style={{ fontSize:11, color:"#444455", marginTop:2 }}>{p.platform} · {fmtDate(p.pub_date)}</div>
+                    </div>
+                    <span style={{ fontSize:11, color:C.violet, fontWeight:700 }}>+ Add →</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   // ── DESKTOP NAV ───────────────────────────────────────────────────────────
   const DesktopNav = () => (
     <div style={{ background:"#0d0d2b", borderBottom:`1px solid #1a1a4a`, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", height:52, position:"sticky", top:0, zIndex:100 }}>
-      <div style={{ display:"flex", alignItems:"center", gap:10 }}><img src="/logo.png" style={{ height:32, width:32, borderRadius:8 }} alt="Taskona"/><span style={{ fontSize:18, fontWeight:800, letterSpacing:2, fontFamily:"Georgia,serif", color:C.white }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span></div>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <img src="/logo.png" style={{ height:32, width:32, borderRadius:8 }} alt="Taskona"/>
+        <span style={{ fontSize:18, fontWeight:800, letterSpacing:2, fontFamily:"Georgia,serif", color:C.white }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span>
+      </div>
       <nav style={{ display:"flex", gap:3 }}>
-        {[["dash","Dashboard"],["week","This Week"],["add","+ Add Post"]].map(([k,l])=>(
+        {[["dash","Dashboard"],["week","This Week"],["plan","Content Plan"],["er","ER Analytics"],["add","+ Add Post"]].map(([k,l])=>(
           <button key={k} onClick={()=>setView(k)} style={{ padding:"6px 14px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:view===k?C.violet:"transparent", color:view===k?C.white:C.muted }}>
             {l}
           </button>
@@ -497,10 +857,16 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
   // ── MOBILE BOTTOM NAV ─────────────────────────────────────────────────────
   const MobileNav = () => (
     <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"#0d0d2b", borderTop:`1px solid #1a1a4a`, display:"flex", zIndex:100 }}>
-      {[{key:"dash",icon:"⊞",label:"Home"},{key:"week",icon:"📆",label:"Week"},{key:"add",icon:"+",label:"Add"},{key:"settings",icon:"⚙",label:"Settings"}].map(n=>(
-        <button key={n.key} onClick={()=>n.key==="settings"?setShowSettings(true):setView(n.key)}
+      {[
+        {key:"dash", icon:"⊞", label:"Home"},
+        {key:"week", icon:"📆", label:"Week"},
+        {key:"plan", icon:"📋", label:"Plan"},
+        {key:"er",   icon:"📊", label:"ER"},
+        {key:"add",  icon:"+",  label:"Add"}
+      ].map(n=>(
+        <button key={n.key} onClick={()=>setView(n.key)}
           style={{ flex:1, padding:"10px 0 8px", background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
-          <span style={{ fontSize:n.key==="add"?22:18, width:n.key==="add"?36:undefined, height:n.key==="add"?36:undefined, borderRadius:n.key==="add"?"50%":undefined, background:n.key==="add"?C.violet:"none", display:"flex", alignItems:"center", justifyContent:"center", color:view===n.key?C.violet:"#555577", fontWeight:700 }}>{n.icon}</span>
+          <span style={{ fontSize:n.key==="add"?22:18, width:n.key==="add"?36:undefined, height:n.key==="add"?36:undefined, borderRadius:n.key==="add"?"50%":undefined, background:n.key==="add"?C.violet:"none", display:"flex", alignItems:"center", justifyContent:"center", color:(view===n.key&&n.key!=="add")?C.violet:n.key==="add"?C.white:"#555577", fontWeight:700 }}>{n.icon}</span>
           <span style={{ fontSize:10, color:view===n.key?C.violet:"#555577", fontWeight:view===n.key?700:400 }}>{n.label}</span>
         </button>
       ))}
@@ -516,10 +882,12 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
 
       {!mobile && <DesktopNav/>}
 
-      {view==="dash" && <Dashboard/>}
-      {view==="week" && <Weekly/>}
-      {view==="add" && <AddPost/>}
+      {view==="dash"   && <Dashboard/>}
+      {view==="week"   && <Weekly/>}
+      {view==="add"    && <AddPost/>}
       {view==="detail" && <Detail/>}
+      {view==="plan"   && <ContentPlanView/>}
+      {view==="er"     && <ERAnalytics/>}
 
       {mobile && <MobileNav/>}
     </div>
