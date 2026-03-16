@@ -598,7 +598,7 @@ const parsed = JSON.parse(match[0]);
           </div>
           <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Goals</div>
-            <input autoFocus style={inp} placeholder="e.g. increase followers, drive bookings" value={cpBrief.goals} onChange={e=>setCpBrief({...cpBrief,goals:e.target.value})}/>
+            <input style={inp} placeholder="e.g. increase followers, drive bookings" value={cpBrief.goals} onChange={e=>setCpBrief({...cpBrief,goals:e.target.value})}/>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
             <div>
