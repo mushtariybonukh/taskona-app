@@ -931,12 +931,12 @@ Output ONLY a JSON array:
 
       {!mobile && <DesktopNav/>}
 
-      {view==="dash"   && <Dashboard/>}
-      {view==="week"   && <Weekly/>}
-      {view==="add"    && <AddPost/>}
-      {view==="detail" && <Detail/>}
+      {view==="dash"   && Dashboard()}
+      {view==="week"   && Weekly()}
+      {view==="add"    && AddPost()}
+      {view==="detail" && Detail()}
       {view==="plan"   && ContentPlanView()}
-      {view==="er"     && <ERAnalytics/>}
+      {view==="er"     && ERAnalytics()}
 
       {mobile && <MobileNav/>}
     </div>
