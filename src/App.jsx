@@ -366,7 +366,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
                       <div style={{ fontSize:11, color:C.muted, marginTop:2 }}>{done}/{pt.length} done</div>
                     </div>
                   </div>
-                </div>;
+                </div>
               })}
         </div>
       </div>
