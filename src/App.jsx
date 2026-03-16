@@ -594,7 +594,7 @@ const parsed = JSON.parse(match[0]);
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Niche / Business *</div>
-            <input style={inp} placeholder="e.g. Fitness studio in Tashkent" value={cpBrief.niche} onChange={e=>setCpBrief({...cpBrief,niche:e.target.value})}/>
+            <input autoFocus style={inp} placeholder="e.g. Fitness studio in Tashkent" value={cpBrief.niche} onChange={e=>setCpBrief({...cpBrief,niche:e.target.value})}/>
           </div>
           <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Goals</div>
