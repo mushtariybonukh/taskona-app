@@ -168,8 +168,10 @@ RESPOND ONLY WITH VALID JSON ARRAY, no other text, no markdown:
         })
       });
       const data = await res.json();
-      let text = data.content[0].text.trim().replace(/```json|```/g,"").trim();
-      const parsed = JSON.parse(text);
+      let text = data.content[0].text.trim();
+const match = text.match(/\[[\s\S]*\]/);
+if (!match) throw new Error("No JSON array found");
+const parsed = JSON.parse(match[0]);
       setCpIdeas(parsed.map((idea,i) => ({ ...idea, id:`idea_${i}`, platform:cpBrief.platform })));
       setCpStep("ideas");
     } catch {
