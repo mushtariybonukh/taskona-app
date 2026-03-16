@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = "https://ukrfnapkypperwvmgiie.supabase.co";
@@ -168,14 +168,16 @@ RESPOND ONLY WITH VALID JSON ARRAY, no other text, no markdown:
         })
       });
       const data = await res.json();
-      let text = data.content[0].text.trim();
-const match = text.match(/\[[\s\S]*\]/);
-if (!match) throw new Error("No JSON array found");
-const parsed = JSON.parse(match[0]);
+      if (data.error) throw new Error(data.error.message);
+      const raw = data.content?.[0]?.text || "";
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (!match) throw new Error("No JSON found in response");
+      const parsed = JSON.parse(match[0]);
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty result");
       setCpIdeas(parsed.map((idea,i) => ({ ...idea, id:`idea_${i}`, platform:cpBrief.platform })));
       setCpStep("ideas");
-    } catch {
-      notify("Generation failed, try again", true);
+    } catch(e) {
+      notify("Generation failed: " + (e.message || "try again"), true);
       setCpStep("brief");
     }
     setCpLoading(false);
@@ -554,6 +556,11 @@ const parsed = JSON.parse(match[0]);
   };
 
   // ── CONTENT PLAN VIEW ─────────────────────────────────────────────────────
+  const nicheRef = useRef(null);
+  useEffect(() => {
+    if (cpStep === "brief") setTimeout(() => nicheRef.current?.focus(), 50);
+  }, [cpStep]);
+
   const ContentPlanView = () => {
 
     if (cpStep === "list") return (
@@ -594,7 +601,7 @@ const parsed = JSON.parse(match[0]);
         <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
           <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Niche / Business *</div>
-            <input autoFocus style={inp} placeholder="e.g. Fitness studio in Tashkent" value={cpBrief.niche} onChange={e=>setCpBrief({...cpBrief,niche:e.target.value})}/>
+            <input ref={nicheRef} style={inp} placeholder="e.g. Fitness studio in Tashkent" value={cpBrief.niche} onChange={e=>setCpBrief({...cpBrief,niche:e.target.value})}/>
           </div>
           <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Goals</div>
