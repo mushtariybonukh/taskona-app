@@ -143,7 +143,43 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
     }
   };
 
-  // ── GENERATE CONTENT PLAN VIA AI ──────────────────────────────────────────
+  // ── GENERATE CONTENT PLAN (smart fallback) ───────────────────────────────
+  const generateFallbackPlan = (niche, goals, platform, numPosts, periodDays) => {
+    const templates = [
+      { type:"Graphic",   goal:"awareness",  titles:["Знакомство с брендом","О нас — кто мы и чем занимаемся","Наша история","Наша команда","Наши ценности"] },
+      { type:"Carousel",  goal:"engagement", titles:["5 причин выбрать нас","Топ продуктов этого сезона","Как мы работаем — пошагово","До и после","FAQ — частые вопросы"] },
+      { type:"Video",     goal:"awareness",  titles:["Закулисье производства","Один день из жизни бренда","Как создаётся продукт","Обзор новинок","Отзыв клиента"] },
+      { type:"Reel",      goal:"engagement", titles:["Быстрый лайфхак","Тренд недели","Трансформация за 15 секунд","Ответ на вопрос подписчика","Вдохновение дня"] },
+      { type:"Text post", goal:"trust",      titles:["История клиента","Почему мы это делаем","Наша философия","Честно о сложностях","Благодарность подписчикам"] },
+      { type:"Graphic",   goal:"sales",      titles:["Акция недели","Новинка в ассортименте","Специальное предложение","Хит продаж","Подборка для вас"] },
+      { type:"Carousel",  goal:"trust",      titles:["Отзывы наших клиентов","Результаты за месяц","Наши сертификаты и достижения","Материалы и качество","Сравнение с аналогами"] },
+      { type:"Story",     goal:"engagement", titles:["Опрос — что вам интереснее?","Викторина о продукте","За кулисами сегодня","Угадай новинку","Голосование"] },
+    ];
+    const captions = {
+      awareness:  `Рассказываем о ${niche} — подписывайтесь, чтобы не пропустить новое!`,
+      engagement: `Сохрани себе и поделись с теми, кому это будет полезно 👇`,
+      sales:      `Успей воспользоваться предложением — пиши в Direct или жми ссылку в профиле`,
+      trust:      `Нам важно ваше доверие. Спасибо, что вы с нами ❤️`,
+    };
+    const interval = Math.floor(periodDays / numPosts);
+    const posts = [];
+    for (let i = 0; i < numPosts; i++) {
+      const tpl = templates[i % templates.length];
+      const titleVariants = tpl.titles;
+      const title = titleVariants[Math.floor(i / templates.length) % titleVariants.length];
+      posts.push({
+        id: `idea_${i}`,
+        title: title,
+        type: tpl.type,
+        date: addDays(TODAY(), (i + 1) * interval),
+        caption: captions[tpl.goal],
+        goal: tpl.goal,
+        platform: platform,
+      });
+    }
+    return posts;
+  };
+
   const generateContentPlan = async () => {
     if (!cpBrief.niche) return notify("Enter niche/business", true);
     setCpLoading(true);
@@ -154,32 +190,34 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:2000,
-          messages:[{ role:"user", content:`You are an expert SMM content strategist. Create a content plan.
+          model:"claude-sonnet-4-20250514", max_tokens:3000,
+          messages:[{ role:"user", content:`You are an expert SMM content strategist. Create a content plan. Reply ONLY with a valid JSON array, no explanation, no markdown, no code blocks.
 Niche/Business: ${cpBrief.niche}
 Goals: ${cpBrief.goals || "increase engagement and followers"}
 Platform: ${cpBrief.platform}
 Number of posts: ${cpBrief.numPosts}
 Period: ${startDate} to ${endDate}
 Today: ${TODAY()}
-Generate exactly ${cpBrief.numPosts} posts spread across the period. Mix content types strategically.
-RESPOND ONLY WITH VALID JSON ARRAY, no other text, no markdown:
-[{"title":"...","type":"Graphic","date":"YYYY-MM-DD","caption":"short caption idea 1-2 sentences","goal":"awareness|engagement|sales|trust"}]` }]
+Generate exactly ${cpBrief.numPosts} posts spread evenly across the period. Mix content types: Graphic, Video, Carousel, Reel, Story, Text post.
+Output ONLY a JSON array:
+[{"title":"Post title","type":"Graphic","date":"YYYY-MM-DD","caption":"Short caption 1-2 sentences","goal":"awareness"}]` }]
         })
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error.message);
       const raw = data.content?.[0]?.text || "";
       const match = raw.match(/\[[\s\S]*\]/);
-      if (!match) throw new Error("No JSON found in response");
+      if (!match) throw new Error("No JSON");
       const parsed = JSON.parse(match[0]);
-      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty result");
+      if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("Empty");
       setCpIdeas(parsed.map((idea,i) => ({ ...idea, id:`idea_${i}`, platform:cpBrief.platform })));
-      setCpStep("ideas");
-    } catch(e) {
-      notify("Generation failed: " + (e.message || "try again"), true);
-      setCpStep("brief");
+    } catch {
+      // Fallback — smart template plan
+      const fallback = generateFallbackPlan(cpBrief.niche, cpBrief.goals, cpBrief.platform, cpBrief.numPosts, cpBrief.periodDays);
+      setCpIdeas(fallback);
+      notify("Plan generated from templates — edit as needed ✓");
     }
+    setCpStep("ideas");
     setCpLoading(false);
   };
 
