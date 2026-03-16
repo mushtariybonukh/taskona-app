@@ -709,6 +709,7 @@ Output ONLY a JSON array:
                 <input type="date" style={inp} value={idea.date} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],date:e.target.value}; setCpIdeas(n); }}/>
               </div>
               <textarea style={{ ...inp, resize:"vertical", minHeight:60, marginBottom:10 }} placeholder="Caption idea" value={idea.caption} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],caption:e.target.value}; setCpIdeas(n); }}/>
+              <input style={{ ...inp, marginBottom:10 }} placeholder="🔗 Reference URL (inspo, example post...)" value={idea.ref||""} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],ref:e.target.value}; setCpIdeas(n); }}/>
               <div style={{ display:"flex", gap:8 }}>
                 <button onClick={()=>setEditingIdea(null)} style={{ ...btn("primary"), flex:1, padding:"10px" }}>✓ Done</button>
                 <button onClick={()=>{ setCpIdeas(cpIdeas.filter((_,j)=>j!==i)); setEditingIdea(null); }} style={{ ...btn("danger"), padding:"10px 16px" }}>🗑</button>
@@ -725,6 +726,7 @@ Output ONLY a JSON array:
               </div>
               <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>📅 {fmtDate(idea.date)}</div>
               <div style={{ fontSize:11, color:"#888899" }}>{idea.caption}</div>
+              {idea.ref&&<a href={idea.ref} target="_blank" rel="noreferrer" style={{ fontSize:11, color:C.violet, marginTop:4, display:"block" }}>🔗 {idea.ref}</a>}
             </div>
           )
         ))}
