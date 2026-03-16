@@ -895,7 +895,7 @@ RESPOND ONLY WITH VALID JSON ARRAY, no other text, no markdown:
       {view==="week"   && <Weekly/>}
       {view==="add"    && <AddPost/>}
       {view==="detail" && <Detail/>}
-      {view==="plan"   && <ContentPlanView/>}
+      {view==="plan"   && ContentPlanView()}
       {view==="er"     && <ERAnalytics/>}
 
       {mobile && <MobileNav/>}
