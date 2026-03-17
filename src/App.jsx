@@ -337,6 +337,13 @@ Output ONLY a JSON array:
     setView("dash"); notify("Deleted");
   };
 
+  const updatePostDate = async (postId, newDate) => {
+    await supabase.from("posts").update({ pub_date:newDate }).eq("id", postId);
+    setPosts(p => p.map(x => x.id===postId ? {...x, pub_date:newDate} : x));
+    setSel(s => s?.id===postId ? {...s, pub_date:newDate} : s);
+    notify("Date updated ✓");
+  };
+
   const saveAnalytics = async () => {
     const a = analytics;
     const er = +a.views>0 ? ((((+a.likes||0)+(+a.comments||0)+(+a.reposts||0)+(+a.saves||0)) / +a.views)*100).toFixed(2) : null;
@@ -577,7 +584,12 @@ Output ONLY a JSON array:
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
             <div style={{ flex:1 }}>
               <div style={{ fontSize:mobile?18:20, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>{selPost.title}</div>
-              <div style={{ color:C.muted, fontSize:12, marginTop:4 }}>{selPost.platform} · {selPost.content_type} · <span style={{ color:C.gold }}>{fmtDate(selPost.pub_date)}</span></div>
+              <div style={{ color:C.muted, fontSize:12, marginTop:4, display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                <span>{selPost.platform} · {selPost.content_type}</span>
+                <span style={{ color:"#444466" }}>·</span>
+                <input type="date" value={selPost.pub_date} onChange={e=>updatePostDate(selPost.id, e.target.value)}
+                  style={{ background:"#1a1a3a", border:`1px solid #3a3a6a`, borderRadius:6, padding:"2px 8px", color:C.gold, fontSize:12, cursor:"pointer", outline:"none" }}/>
+              </div>
               {selPost.client&&<div style={{ color:C.violet2, fontSize:12, marginTop:2 }}>{selPost.client}</div>}
             </div>
             <button onClick={()=>deletePost(selPost.id)} style={{ ...btn("danger"), padding:"6px 12px", fontSize:12 }}>Delete</button>
