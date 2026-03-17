@@ -126,7 +126,7 @@ export default function Taskona() {
       const res = await fetch("/api/generate", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:600,
+          model:"claude-sonnet-4-5", max_tokens:600,
           messages:[{ role:"user", content:`Content task planner for Taskona.ai.
 Post: "${post.title}" | Type: ${post.contentType||post.content_type} | Platform: ${post.platform} | Pub: ${post.pubDate||post.pub_date} | Client: ${post.client||"N/A"}
 Buffer: ${buf} days. Prep by: ${prepDate}. Today: ${TODAY()}.
@@ -200,7 +200,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
       const res = await fetch("/api/generate", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
-          model:"claude-sonnet-4-20250514", max_tokens:3000,
+          model:"claude-sonnet-4-5", max_tokens:3000,
           messages:[{ role:"user", content:`You are an expert SMM content strategist. Create a content plan. Reply ONLY with a valid JSON array, no explanation, no markdown, no code blocks.
 Niche/Business: ${cpBrief.niche}
 Goals: ${cpBrief.goals || "increase engagement and followers"}
