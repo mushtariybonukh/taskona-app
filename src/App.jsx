@@ -691,7 +691,23 @@ Output ONLY a JSON array:
                 </div>
               )}
             </div>
-            <button onClick={()=>deletePost(selPost.id)} style={{ ...btn("danger"), padding:"6px 12px", fontSize:12 }}>Delete</button>
+            <div style={{ display:"flex", gap:8 }}>
+              {projects.length > 0 && (
+                <select value={selPost.project_id||""} onChange={async e=>{
+                  const projId = e.target.value || null;
+                  await supabase.from("posts").update({ project_id:projId }).eq("id", selPost.id);
+                  await supabase.from("tasks").update({ project_id:projId }).eq("post_id", selPost.id);
+                  setPosts(p => p.map(x => x.id===selPost.id ? {...x,project_id:projId} : x));
+                  setTasks(t => t.map(x => x.post_id===selPost.id ? {...x,project_id:projId} : x));
+                  setSel(s => s?.id===selPost.id ? {...s,project_id:projId} : s);
+                  notify(projId ? `Moved to ${projects.find(p=>p.id===projId)?.name} ✓` : "Removed from project ✓");
+                }} style={{ background:"#1a1a3a", border:`1px solid #3a3a6a`, borderRadius:8, padding:"6px 10px", color:C.muted, fontSize:12, cursor:"pointer" }}>
+                  <option value="">No project</option>
+                  {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+              <button onClick={()=>deletePost(selPost.id)} style={{ ...btn("danger"), padding:"6px 12px", fontSize:12 }}>Delete</button>
+            </div>
           </div>
         </div>
         <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:10, textTransform:"uppercase" }}>Tasks ({postTasks.length})</div>
