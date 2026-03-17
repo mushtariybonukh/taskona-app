@@ -274,7 +274,7 @@ Output ONLY a JSON array:
       const idea = planPosts[i];
       const postId = `${plan.id}_${i}`;
       const buf = getBuffer(idea.type || "Graphic");
-      const newPost = { id:postId, title:idea.title, content_type:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pub_date:idea.date, client:"", description:idea.caption||"", created_at:TODAY(), analytics:null, user_id:userId };
+      const newPost = { id:postId, title:idea.title, content_type:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pub_date:idea.date, client:"", description:(idea.caption||"") + (idea.ref ? `\n\n🔗 Ref: ${idea.ref}` : ""), created_at:TODAY(), analytics:null, user_id:userId };
       const newTasks = await generateTasks({ title:idea.title, contentType:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pubDate:idea.date, client:"" }, postId, buf);
       allPosts.push(newPost); allTasks.push(...newTasks);
     }
@@ -600,6 +600,12 @@ Output ONLY a JSON array:
                   style={{ background:"#1a1a3a", border:`1px solid #3a3a6a`, borderRadius:6, padding:"2px 8px", color:C.gold, fontSize:12, cursor:"pointer", outline:"none" }}/>
               </div>
               {selPost.client&&<div style={{ color:C.violet2, fontSize:12, marginTop:2 }}>{selPost.client}</div>}
+              {selPost.description&&(
+                <div style={{ marginTop:10, background:"#0a0a1e", border:`1px solid #2a2a45`, borderRadius:10, padding:"10px 14px" }}>
+                  <div style={{ fontSize:10, color:C.violet, fontWeight:700, letterSpacing:2, marginBottom:6 }}>BRIEF / DESCRIPTION</div>
+                  <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>{selPost.description}</div>
+                </div>
+              )}
             </div>
             <button onClick={()=>deletePost(selPost.id)} style={{ ...btn("danger"), padding:"6px 12px", fontSize:12 }}>Delete</button>
           </div>
