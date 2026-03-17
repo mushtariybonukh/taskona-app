@@ -10,6 +10,13 @@ function getUserId() {
     const tg = window.Telegram?.WebApp?.initDataUnsafe?.user;
     if (tg?.id) return String(tg.id);
   } catch {}
+  // Check if opened via invite link
+  const params = new URLSearchParams(window.location.search);
+  const inviteId = params.get("invite");
+  if (inviteId) {
+    localStorage.setItem("taskona_uid", inviteId);
+    return inviteId;
+  }
   let uid = localStorage.getItem("taskona_uid");
   if (!uid) { uid = "user_" + Math.random().toString(36).slice(2); localStorage.setItem("taskona_uid", uid); }
   return uid;
@@ -75,7 +82,7 @@ export default function Taskona() {
   // ── CONTENT PLAN STATE ────────────────────────────────────────────────────
   const [contentPlans, setContentPlans] = useState([]);
   const [cpStep, setCpStep] = useState("list"); // list | brief | generating | ideas | detail
-  const [cpBrief, setCpBrief] = useState({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"" });
+  const [cpBrief, setCpBrief] = useState({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"", infoReasons:"" });
   const [cpFiles, setCpFiles] = useState([]); // uploaded PDFs
   const [cpFilesText, setCpFilesText] = useState(""); // extracted text from PDFs
   const [cpIdeas, setCpIdeas] = useState([]);
@@ -201,6 +208,7 @@ Number of posts: ${cpBrief.numPosts}
 Period: ${startDate} to ${endDate}
 Today: ${TODAY()}
 Page status: ${cpBrief.pageStatus === "new" ? "NEW page — include introductory content like brand intro, meet the team, our story" : `EXISTING page with ${cpBrief.followers||"unknown"} followers — skip intro posts, focus on engagement, value, sales. Existing rubrics: ${cpBrief.existingRubrics||"unknown"}`}
+${cpBrief.infoReasons ? `Key dates & info occasions: ${cpBrief.infoReasons}` : ""}
 ${cpFilesText ? `Brand guidelines from uploaded files:\n${cpFilesText.slice(0,2000)}` : ""}
 Generate exactly ${cpBrief.numPosts} posts spread evenly across the period. Mix content types: Graphic, Video, Carousel, Reel, Story, Text post.
 Output ONLY a JSON array:
@@ -233,7 +241,7 @@ Output ONLY a JSON array:
     setContentPlans(cp => [plan, ...cp]);
     notify(status==="sent" ? "Downloaded & saved as Sent ✓" : "Draft saved ✓");
     setCpStep("list"); setCpIdeas([]);
-    setCpBrief({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"" });
+    setCpBrief({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"", infoReasons:"" });
     setCpFiles([]); setCpFilesText("");
     return plan;
   };
@@ -734,6 +742,10 @@ Output ONLY a JSON array:
             </div>
           </>}
           <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>📅 Инфоповоды / Events</div>
+            <textarea style={{ ...inp, resize:"vertical", minHeight:70 }} placeholder="e.g. 8 марта, Новруз 21 марта, скидка 20% с 1-15 апреля, открытие нового филиала 10 апреля..." value={cpBrief.infoReasons} onChange={e=>setCpBrief({...cpBrief,infoReasons:e.target.value})}/>
+          </div>
+          <div>
             <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>📎 Brand files (PDF) — брендбук, TOV, гайды</div>
             <label style={{ display:"block", cursor:"pointer" }}>
               <div style={{ background:"#0a0a1e", border:`2px dashed ${cpFiles.length?C.violet:"#2a2a55"}`, borderRadius:10, padding:"14px", textAlign:"center", color:cpFiles.length?C.violet2:C.muted, fontSize:13 }}>
@@ -976,7 +988,14 @@ Output ONLY a JSON array:
           </button>
         ))}
       </nav>
-      <button onClick={()=>{ setEditBuffers({...buffers}); setShowSettings(true); }} style={{ ...btn(), padding:"5px 12px", fontSize:11 }}>⚙ Buffers</button>
+      <div style={{ display:"flex", gap:8 }}>
+        <button onClick={()=>{
+          const link = `${window.location.origin}${window.location.pathname}?invite=${userId}`;
+          navigator.clipboard.writeText(link);
+          notify("Invite link copied! ✓");
+        }} style={{ ...btn(), padding:"5px 12px", fontSize:11 }}>🔗 Invite</button>
+        <button onClick={()=>{ setEditBuffers({...buffers}); setShowSettings(true); }} style={{ ...btn(), padding:"5px 12px", fontSize:11 }}>⚙ Buffers</button>
+      </div>
     </div>
   );
 
@@ -988,9 +1007,15 @@ Output ONLY a JSON array:
         {key:"week", icon:"📆", label:"Week"},
         {key:"plan", icon:"📋", label:"Plan"},
         {key:"er",   icon:"📊", label:"ER"},
-        {key:"add",  icon:"+",  label:"Add"}
+        {key:"add",  icon:"+",  label:"Add"},
+        {key:"invite", icon:"🔗", label:"Invite"}
       ].map(n=>(
-        <button key={n.key} onClick={()=>setView(n.key)}
+        <button key={n.key} onClick={()=>{
+          if (n.key==="invite") {
+            const link = `${window.location.origin}${window.location.pathname}?invite=${userId}`;
+            navigator.clipboard.writeText(link).then(()=>notify("Invite link copied! ✓")).catch(()=>notify(link));
+          } else { setView(n.key); }
+        }}
           style={{ flex:1, padding:"10px 0 8px", background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3 }}>
           <span style={{ fontSize:n.key==="add"?22:18, width:n.key==="add"?36:undefined, height:n.key==="add"?36:undefined, borderRadius:n.key==="add"?"50%":undefined, background:n.key==="add"?C.violet:"none", display:"flex", alignItems:"center", justifyContent:"center", color:(view===n.key&&n.key!=="add")?C.violet:n.key==="add"?C.white:"#555577", fontWeight:700 }}>{n.icon}</span>
           <span style={{ fontSize:10, color:view===n.key?C.violet:"#555577", fontWeight:view===n.key?700:400 }}>{n.label}</span>
