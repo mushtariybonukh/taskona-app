@@ -10,7 +10,6 @@ function getUserId() {
     const tg = window.Telegram?.WebApp?.initDataUnsafe?.user;
     if (tg?.id) return String(tg.id);
   } catch {}
-  // Check if opened via invite link
   const params = new URLSearchParams(window.location.search);
   const inviteId = params.get("invite");
   if (inviteId) {
@@ -20,6 +19,11 @@ function getUserId() {
   let uid = localStorage.getItem("taskona_uid");
   if (!uid) { uid = "user_" + Math.random().toString(36).slice(2); localStorage.setItem("taskona_uid", uid); }
   return uid;
+}
+
+function getProjectId() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("project") || null;
 }
 
 const isMobile = () => window.innerWidth < 768 || !!window.Telegram?.WebApp?.initData;
@@ -79,6 +83,13 @@ export default function Taskona() {
   const [showSettings, setShowSettings] = useState(false);
   const [editBuffers, setEditBuffers] = useState(DEFAULT_BUFFERS);
 
+  // ── PROJECTS STATE ───────────────────────────────────────────────────────
+  const [projects, setProjects] = useState([]);
+  const [activeProjectId, setActiveProjectId] = useState(() => getProjectId()); // null = all projects (owner view)
+  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectClient, setNewProjectClient] = useState("");
+
   // ── CONTENT PLAN STATE ────────────────────────────────────────────────────
   const [contentPlans, setContentPlans] = useState([]);
   const [cpStep, setCpStep] = useState("list"); // list | brief | generating | ideas | detail
@@ -98,6 +109,8 @@ export default function Taskona() {
   }, []);
 
   const loadData = async () => {
+    const { data: proj } = await supabase.from("projects").select("*").eq("user_id", userId).order("created_at", { ascending:false });
+    if (proj) setProjects(proj);
     const { data: p } = await supabase.from("posts").select("*").eq("user_id", userId).order("pub_date");
     const { data: t } = await supabase.from("tasks").select("*").eq("user_id", userId).order("due_date");
     const { data: b } = await supabase.from("buffers").select("*").eq("id", 1).single();
@@ -118,6 +131,33 @@ export default function Taskona() {
     setBuffers(cleaned); setEditBuffers(cleaned);
     setShowSettings(false); notify("Saved ✓");
   };
+
+  // ── PROJECTS ─────────────────────────────────────────────────────────────
+  const createProject = async () => {
+    if (!newProjectName) return notify("Enter project name", true);
+    const id = "proj_" + Date.now();
+    const proj = { id, user_id:userId, name:newProjectName, client:newProjectClient, created_at:TODAY() };
+    await supabase.from("projects").insert(proj);
+    setProjects(p => [proj, ...p]);
+    setNewProjectName(""); setNewProjectClient("");
+    setShowProjectModal(false);
+    notify(`Project "${newProjectName}" created ✓`);
+  };
+
+  const deleteProject = async (projId) => {
+    await supabase.from("projects").delete().eq("id", projId);
+    setProjects(p => p.filter(x => x.id !== projId));
+    if (activeProjectId === projId) setActiveProjectId(null);
+    notify("Project deleted");
+  };
+
+  const getProjectInviteLink = (projId) => {
+    return `${window.location.origin}${window.location.pathname}?invite=${userId}&project=${projId}`;
+  };
+
+  // Filter posts/tasks by active project
+  const filteredPosts = activeProjectId ? posts.filter(p => p.project_id === activeProjectId) : posts;
+  const filteredTasks = activeProjectId ? tasks.filter(t => t.project_id === activeProjectId) : tasks;
 
   // ── GENERATE TASKS VIA AI ─────────────────────────────────────────────────
   const generateTasks = async (post, postId, buf) => {
@@ -140,7 +180,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
         id:`${postId}_${i}`, post_id:postId, post_title:post.title,
         platform:post.platform, content_type:post.contentType||post.content_type,
         title:t.title, role:t.role, due_date:t.dueDate,
-        pub_date:post.pubDate||post.pub_date, status:"scheduled", user_id:userId
+        pub_date:post.pubDate||post.pub_date, status:"scheduled", user_id:userId, project_id:post.project_id||null
       }));
     } catch {
       return [
@@ -237,7 +277,7 @@ Output ONLY a JSON array:
   // ── SAVE CONTENT PLAN ─────────────────────────────────────────────────────
   const saveContentPlan = async (status = "draft") => {
     const planId = Date.now().toString();
-    const plan = { id:planId, user_id:userId, niche:cpBrief.niche, goals:cpBrief.goals, platform:cpBrief.platform, posts:cpIdeas, status, created_at:TODAY() };
+    const plan = { id:planId, user_id:userId, niche:cpBrief.niche, goals:cpBrief.goals, platform:cpBrief.platform, posts:cpIdeas, status, created_at:TODAY(), project_id:activeProjectId||null };
     await supabase.from("content_plans").insert(plan);
     setContentPlans(cp => [plan, ...cp]);
     notify(status==="sent" ? "Downloaded & saved as Sent ✓" : "Draft saved ✓");
@@ -274,7 +314,7 @@ Output ONLY a JSON array:
       const idea = planPosts[i];
       const postId = `${plan.id}_${i}`;
       const buf = getBuffer(idea.type || "Graphic");
-      const newPost = { id:postId, title:idea.title, content_type:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pub_date:idea.date, client:"", description:(idea.caption||"") + (idea.ref ? `\n\n🔗 Ref: ${idea.ref}` : ""), created_at:TODAY(), analytics:null, user_id:userId };
+      const newPost = { id:postId, title:idea.title, content_type:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pub_date:idea.date, client:"", description:(idea.caption||"") + (idea.ref ? `\n\n🔗 Ref: ${idea.ref}` : ""), created_at:TODAY(), analytics:null, user_id:userId, project_id:plan.project_id||activeProjectId||null };
       const newTasks = await generateTasks({ title:idea.title, contentType:idea.type||"Graphic", platform:idea.platform||plan.platform||"Instagram", pubDate:idea.date, client:"" }, postId, buf);
       allPosts.push(newPost); allTasks.push(...newTasks);
     }
@@ -293,7 +333,7 @@ Output ONLY a JSON array:
     setLoading(true);
     const buf = getBuffer(form.contentType);
     const postId = Date.now().toString();
-    const newPost = { id:postId, title:form.title, content_type:form.contentType, platform:form.platform, pub_date:form.pubDate, client:form.client, description:form.description, created_at:TODAY(), analytics:null, user_id:userId };
+    const newPost = { id:postId, title:form.title, content_type:form.contentType, platform:form.platform, pub_date:form.pubDate, client:form.client, description:form.description, created_at:TODAY(), analytics:null, user_id:userId, project_id:activeProjectId||null };
     const newTasks = await generateTasks(form, postId, buf);
     await supabase.from("posts").insert(newPost);
     await supabase.from("tasks").insert(newTasks);
@@ -362,9 +402,9 @@ Output ONLY a JSON array:
     notify("Saved ✓");
   };
 
-  const todayTasks = tasks.filter(t=>t.due_date===TODAY()&&t.status!=="posted");
-  const burning = tasks.filter(t=>urgency(t)==="burning");
-  const weekTasks = tasks.filter(t=>{ const d=daysDiff(t.due_date); return d>=-1&&d<=7&&t.status!=="posted"; }).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
+  const todayTasks = filteredTasks.filter(t=>t.due_date===TODAY()&&t.status!=="posted");
+  const burning = filteredTasks.filter(t=>urgency(t)==="burning");
+  const weekTasks = filteredTasks.filter(t=>{ const d=daysDiff(t.due_date); return d>=-1&&d<=7&&t.status!=="posted"; }).sort((a,b)=>new Date(a.due_date)-new Date(b.due_date));
 
   const C = { bg:"#080818", card:"#0f0f2e", border:"#1a1a4a", violet:"#6c63ff", violet2:"#9d97ff", green:"#00C853", red:"#ef5350", gold:"#c4956a", text:"#e0e0f0", muted:"#666688", white:"#ffffff" };
   const selPost = sel ? posts.find(p=>p.id===sel.id) : null;
@@ -410,6 +450,26 @@ Output ONLY a JSON array:
       )}
       <div style={{ fontSize:11, color:"#444466", marginTop:8 }}>
         💡 <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noreferrer" style={{ color:"#555577" }}>Google Sheets</a> → File → Download → CSV
+      </div>
+    </div>
+  );
+
+  const ProjectModal = () => (
+    <div style={{ position:"fixed", inset:0, background:"#00000099", zIndex:200, display:"flex", alignItems:mobile?"flex-end":"center", justifyContent:"center" }}>
+      <div style={{ background:"#0d0d2b", borderRadius:mobile?"20px 20px 0 0":"14px", padding:24, width:mobile?"100%":"420px" }}>
+        <div style={{ fontSize:18, fontWeight:800, color:C.white, fontFamily:"Georgia,serif", marginBottom:16 }}>New Project</div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Project Name *</div>
+          <input style={inp} placeholder="e.g. Ekonika, Crocs, Uzcard" value={newProjectName} onChange={e=>setNewProjectName(e.target.value)} autoFocus/>
+        </div>
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Client</div>
+          <input style={inp} placeholder="Client company name" value={newProjectClient} onChange={e=>setNewProjectClient(e.target.value)}/>
+        </div>
+        <div style={{ display:"flex", gap:10 }}>
+          <button onClick={createProject} style={{ ...btn("primary"), flex:1 }}>Create Project</button>
+          <button onClick={()=>setShowProjectModal(false)} style={{ ...btn(), flex:1 }}>Cancel</button>
+        </div>
       </div>
     </div>
   );
@@ -464,8 +524,23 @@ Output ONLY a JSON array:
           <div style={{ fontSize:12, color:C.muted }}>{fmtDate(TODAY())}</div>
         </div>
       )}
+      {/* Project selector */}
+      <div style={{ display:"flex", gap:8, marginBottom:16, overflowX:"auto", paddingBottom:4 }}>
+        <div onClick={()=>setActiveProjectId(null)} style={{ padding:"6px 14px", borderRadius:20, background:!activeProjectId?C.violet:"#0f0f2e", color:!activeProjectId?C.white:C.muted, fontSize:12, fontWeight:700, cursor:"pointer", flexShrink:0, border:`1px solid ${!activeProjectId?C.violet:"#1a1a4a"}` }}>
+          All Projects
+        </div>
+        {projects.map(proj=>(
+          <div key={proj.id} onClick={()=>setActiveProjectId(proj.id)} style={{ padding:"6px 14px", borderRadius:20, background:activeProjectId===proj.id?C.violet:"#0f0f2e", color:activeProjectId===proj.id?C.white:C.muted, fontSize:12, fontWeight:700, cursor:"pointer", flexShrink:0, border:`1px solid ${activeProjectId===proj.id?C.violet:"#1a1a4a"}`, display:"flex", alignItems:"center", gap:8 }}>
+            {proj.name}
+            {!activeProjectId && <span onClick={e=>{e.stopPropagation(); const link=getProjectInviteLink(proj.id); navigator.clipboard.writeText(link); notify("Invite link copied ✓");}} style={{ fontSize:10, color:C.violet2 }}>🔗</span>}
+          </div>
+        ))}
+        <div onClick={()=>setShowProjectModal(true)} style={{ padding:"6px 14px", borderRadius:20, background:"#0a0a1e", color:C.violet, fontSize:12, fontWeight:700, cursor:"pointer", flexShrink:0, border:`1px dashed #3a3a6a` }}>
+          + New Project
+        </div>
+      </div>
       <div style={{ display:"grid", gridTemplateColumns:mobile?"1fr 1fr":"repeat(4,1fr)", gap:10, marginBottom:16 }}>
-        {[{n:posts.length,l:"Total Posts",c:C.violet2,icon:"📋"},{n:todayTasks.length,l:"Due Today",c:todayTasks.length?C.violet:C.green,icon:"📅"},{n:burning.length,l:"Burning",c:burning.length?C.red:C.green,icon:"🔥"},{n:weekTasks.length,l:"This Week",c:C.gold,icon:"📆"}].map((s,i)=>(
+        {[{n:filteredPosts.length,l:"Total Posts",c:C.violet2,icon:"📋"},{n:todayTasks.length,l:"Due Today",c:todayTasks.length?C.violet:C.green,icon:"📅"},{n:burning.length,l:"Burning",c:burning.length?C.red:C.green,icon:"🔥"},{n:weekTasks.length,l:"This Week",c:C.gold,icon:"📆"}].map((s,i)=>(
           <div key={i} style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"14px 16px" }}>
             <div style={{ fontSize:11, color:C.muted, marginBottom:4 }}>{s.icon} {s.l}</div>
             <div style={{ fontSize:mobile?28:30, fontWeight:800, color:s.c, fontFamily:"Georgia,serif" }}>{s.n}</div>
@@ -488,7 +563,7 @@ Output ONLY a JSON array:
           <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.violet, marginBottom:10, textTransform:"uppercase" }}>All Posts ({posts.length})</div>
           {posts.length===0
             ? <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:12, padding:20, color:C.muted, fontSize:13, textAlign:"center" }}>No posts yet.<br/>Import a plan or tap + to add a post.</div>
-            : posts.sort((a,b)=>new Date(a.pub_date)-new Date(b.pub_date)).map(p=>{
+            : filteredPosts.sort((a,b)=>new Date(a.pub_date)-new Date(b.pub_date)).map(p=>{
                 const pt=tasks.filter(t=>t.post_id===p.id), done=pt.filter(t=>t.status==="posted").length, diff=daysDiff(p.pub_date), hasBurning=pt.some(t=>urgency(t)==="burning");
                 return <div key={p.id} onClick={()=>{setSel(p);setAnalytics(p.analytics||{});setView("detail");}} style={{ background:"#0f0f2e", border:`1px solid ${hasBurning?"#3a1010":"#1a1a4a"}`, borderRadius:14, padding:"14px 16px", marginBottom:10, cursor:"pointer" }}>
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
@@ -559,6 +634,15 @@ Output ONLY a JSON array:
       <ImportSection/>
       <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:C.muted, marginBottom:14, textTransform:"uppercase" }}>Or add manually</div>
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        {projects.length > 0 && (
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Project</div>
+            <select style={sel_style} value={activeProjectId||""} onChange={e=>setActiveProjectId(e.target.value||null)}>
+              <option value="">No project</option>
+              {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+        )}
         <div><div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Post Title *</div><input style={inp} placeholder="e.g. Spring Campaign Launch" value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
           <div><div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Content Type</div><select style={sel_style} value={form.contentType} onChange={e=>setForm({...form,contentType:e.target.value})}>{CTYPES.map(t=><option key={t}>{t}</option>)}</select></div>
@@ -1035,6 +1119,7 @@ Output ONLY a JSON array:
   return (
     <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Segoe UI',system-ui,sans-serif", fontSize:14, maxWidth:mobile?480:"100%", margin:"0 auto" }}>
       {showSettings && <SettingsModal/>}
+      {showProjectModal && <ProjectModal/>}
       {toast && <div style={{ position:"fixed", top:14, left:"50%", transform:"translateX(-50%)", zIndex:999, background:toast.err?"#2a0808":"#0a2a1a", border:`1px solid ${toast.err?C.red:C.green}`, color:toast.err?C.red:C.green, padding:"10px 20px", borderRadius:20, fontWeight:600, fontSize:13, whiteSpace:"nowrap" }}>{toast.msg}</div>}
       {(loading||importLoading) && <div style={{ position:"fixed", top:0, left:0, right:0, background:C.violet, padding:"8px 16px", zIndex:98, fontSize:13, color:C.white, fontWeight:600, textAlign:"center" }}>⚡ {importProgress||"AI generating tasks..."}</div>}
 
