@@ -123,7 +123,7 @@ export default function Taskona() {
   const generateTasks = async (post, postId, buf) => {
     const prepDate = addDays(post.pubDate || post.pub_date, -buf);
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/generate", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:600,
@@ -197,7 +197,7 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
     try {
       const startDate = addDays(TODAY(), 1);
       const endDate = addDays(TODAY(), cpBrief.periodDays);
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/generate", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({
           model:"claude-sonnet-4-20250514", max_tokens:3000,
