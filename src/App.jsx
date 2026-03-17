@@ -75,7 +75,9 @@ export default function Taskona() {
   // ── CONTENT PLAN STATE ────────────────────────────────────────────────────
   const [contentPlans, setContentPlans] = useState([]);
   const [cpStep, setCpStep] = useState("list"); // list | brief | generating | ideas | detail
-  const [cpBrief, setCpBrief] = useState({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30 });
+  const [cpBrief, setCpBrief] = useState({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"" });
+  const [cpFiles, setCpFiles] = useState([]); // uploaded PDFs
+  const [cpFilesText, setCpFilesText] = useState(""); // extracted text from PDFs
   const [cpIdeas, setCpIdeas] = useState([]);
   const [cpLoading, setCpLoading] = useState(false);
   const [activePlan, setActivePlan] = useState(null);
@@ -198,6 +200,8 @@ Platform: ${cpBrief.platform}
 Number of posts: ${cpBrief.numPosts}
 Period: ${startDate} to ${endDate}
 Today: ${TODAY()}
+Page status: ${cpBrief.pageStatus === "new" ? "NEW page — include introductory content like brand intro, meet the team, our story" : `EXISTING page with ${cpBrief.followers||"unknown"} followers — skip intro posts, focus on engagement, value, sales. Existing rubrics: ${cpBrief.existingRubrics||"unknown"}`}
+${cpFilesText ? `Brand guidelines from uploaded files:\n${cpFilesText.slice(0,2000)}` : ""}
 Generate exactly ${cpBrief.numPosts} posts spread evenly across the period. Mix content types: Graphic, Video, Carousel, Reel, Story, Text post.
 Output ONLY a JSON array:
 [{"title":"Post title","type":"Graphic","date":"YYYY-MM-DD","caption":"Short caption 1-2 sentences","goal":"awareness"}]` }]
@@ -229,7 +233,8 @@ Output ONLY a JSON array:
     setContentPlans(cp => [plan, ...cp]);
     notify(status==="sent" ? "Downloaded & saved as Sent ✓" : "Draft saved ✓");
     setCpStep("list"); setCpIdeas([]);
-    setCpBrief({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30 });
+    setCpBrief({ niche:"", goals:"", platform:"Instagram", numPosts:10, periodDays:30, pageStatus:"existing", followers:"", existingRubrics:"" });
+    setCpFiles([]); setCpFilesText("");
     return plan;
   };
 
@@ -594,6 +599,35 @@ Output ONLY a JSON array:
   };
 
   // ── CONTENT PLAN VIEW ─────────────────────────────────────────────────────
+  // ── EXTRACT TEXT FROM PDF ────────────────────────────────────────────────
+  const extractPdfText = async (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          // Simple text extraction — read as text, strip non-printable
+          const text = e.target.result;
+          const clean = text.replace(/[^\x20-\x7E\n\r\u0400-\u04FF]/g," ").replace(/\s+/g," ").trim().slice(0,3000);
+          resolve(clean);
+        } catch { resolve(""); }
+      };
+      reader.readAsText(file, "utf-8");
+    });
+  };
+
+  const handleCpFiles = async (e) => {
+    const files = Array.from(e.target.files);
+    setCpFiles(files);
+    notify("Reading files...");
+    let combined = "";
+    for (const file of files) {
+      const text = await extractPdfText(file);
+      combined += `\n--- ${file.name} ---\n${text}`;
+    }
+    setCpFilesText(combined);
+    notify(`✓ ${files.length} file(s) loaded`);
+  };
+
   const nicheRef = useRef(null);
   useEffect(() => {
     if (cpStep === "brief") setTimeout(() => nicheRef.current?.focus(), 50);
@@ -664,6 +698,37 @@ Output ONLY a JSON array:
             <select style={sel_style} value={cpBrief.periodDays} onChange={e=>setCpBrief({...cpBrief,periodDays:+e.target.value})}>
               {[14,21,30,60].map(n=><option key={n} value={n}>{n} days</option>)}
             </select>
+          </div>
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Page Status</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              {[{v:"new",l:"🆕 New page"},{v:"existing",l:"📈 Already active"}].map(o=>(
+                <div key={o.v} onClick={()=>setCpBrief({...cpBrief,pageStatus:o.v})} style={{ padding:"10px 14px", borderRadius:10, border:`2px solid ${cpBrief.pageStatus===o.v?C.violet:"#2a2a55"}`, background:cpBrief.pageStatus===o.v?"#1a1a4a":"#0d0d2b", cursor:"pointer", fontSize:13, fontWeight:cpBrief.pageStatus===o.v?700:400, color:cpBrief.pageStatus===o.v?C.white:C.muted, textAlign:"center" }}>
+                  {o.l}
+                </div>
+              ))}
+            </div>
+          </div>
+          {cpBrief.pageStatus==="existing" && <>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div>
+                <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Followers</div>
+                <input style={inp} placeholder="e.g. 12000" value={cpBrief.followers} onChange={e=>setCpBrief({...cpBrief,followers:e.target.value})}/>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>Existing Rubrics</div>
+                <input style={inp} placeholder="e.g. tips, reviews, promo" value={cpBrief.existingRubrics} onChange={e=>setCpBrief({...cpBrief,existingRubrics:e.target.value})}/>
+              </div>
+            </div>
+          </>}
+          <div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:6 }}>📎 Brand files (PDF) — брендбук, TOV, гайды</div>
+            <label style={{ display:"block", cursor:"pointer" }}>
+              <div style={{ background:"#0a0a1e", border:`2px dashed ${cpFiles.length?C.violet:"#2a2a55"}`, borderRadius:10, padding:"14px", textAlign:"center", color:cpFiles.length?C.violet2:C.muted, fontSize:13 }}>
+                {cpFiles.length ? `✓ ${cpFiles.map(f=>f.name).join(", ")}` : "Click to upload PDF files"}
+              </div>
+              <input type="file" accept=".pdf,.txt,.doc" multiple onChange={handleCpFiles} style={{ display:"none" }}/>
+            </label>
           </div>
           <button onClick={generateContentPlan} disabled={cpLoading} style={{ ...btn("primary"), width:"100%" }}>
             ✦ Generate with AI
