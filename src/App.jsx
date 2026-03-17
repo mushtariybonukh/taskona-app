@@ -153,9 +153,10 @@ ONLY JSON array: [{"title":"...","role":"PM","dueDate":"YYYY-MM-DD"}]` }]
   };
 
   // ── GENERATE CONTENT PLAN (smart fallback) ───────────────────────────────
-  const generateFallbackPlan = (niche, goals, platform, numPosts, periodDays) => {
+  const generateFallbackPlan = (niche, goals, platform, numPosts, periodDays, pageStatus, infoReasons) => {
+    const isNew = pageStatus === "new";
     const templates = [
-      { type:"Graphic",   goal:"awareness",  titles:["Знакомство с брендом","О нас — кто мы и чем занимаемся","Наша история","Наша команда","Наши ценности"] },
+      { type:"Graphic",   goal:"awareness",  titles: isNew ? ["Знакомство с брендом","О нас — кто мы и чем занимаемся","Наша история","Наша команда","Наши ценности"] : ["Новинка недели","Подборка лучшего","Топ продуктов сезона","Факт о бренде","За кадром"] },
       { type:"Carousel",  goal:"engagement", titles:["5 причин выбрать нас","Топ продуктов этого сезона","Как мы работаем — пошагово","До и после","FAQ — частые вопросы"] },
       { type:"Video",     goal:"awareness",  titles:["Закулисье производства","Один день из жизни бренда","Как создаётся продукт","Обзор новинок","Отзыв клиента"] },
       { type:"Reel",      goal:"engagement", titles:["Быстрый лайфхак","Тренд недели","Трансформация за 15 секунд","Ответ на вопрос подписчика","Вдохновение дня"] },
@@ -225,7 +226,7 @@ Output ONLY a JSON array:
       setCpIdeas(parsed.map((idea,i) => ({ ...idea, id:`idea_${i}`, platform:cpBrief.platform })));
     } catch {
       // Fallback — smart template plan
-      const fallback = generateFallbackPlan(cpBrief.niche, cpBrief.goals, cpBrief.platform, cpBrief.numPosts, cpBrief.periodDays);
+      const fallback = generateFallbackPlan(cpBrief.niche, cpBrief.goals, cpBrief.platform, cpBrief.numPosts, cpBrief.periodDays, cpBrief.pageStatus, cpBrief.infoReasons);
       setCpIdeas(fallback);
       notify("Plan generated from templates — edit as needed ✓");
     }
@@ -795,7 +796,7 @@ Output ONLY a JSON array:
               <input style={{ ...inp, marginBottom:10 }} placeholder="Title" value={idea.title} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],title:e.target.value}; setCpIdeas(n); }}/>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
                 <select style={sel_style} value={idea.type} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],type:e.target.value}; setCpIdeas(n); }}>{CTYPES.map(t=><option key={t}>{t}</option>)}</select>
-                <input type="date" style={inp} value={idea.date} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],date:e.target.value}; setCpIdeas(n); }}/>
+                <input type="date" style={{ ...inp, colorScheme:"dark", cursor:"pointer" }} value={idea.date} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],date:e.target.value}; setCpIdeas(n); }}/>
               </div>
               <textarea style={{ ...inp, resize:"vertical", minHeight:60, marginBottom:10 }} placeholder="Caption idea" value={idea.caption} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],caption:e.target.value}; setCpIdeas(n); }}/>
               <input style={{ ...inp, marginBottom:10 }} placeholder="🔗 Reference URL (inspo, example post...)" value={idea.ref||""} onChange={e=>{ const n=[...cpIdeas]; n[i]={...n[i],ref:e.target.value}; setCpIdeas(n); }}/>
