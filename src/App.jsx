@@ -709,6 +709,63 @@ Output ONLY a JSON array:
     );
   };
 
+  // ── PROJECTS VIEW ────────────────────────────────────────────────────────
+  const ProjectsView = () => (
+    <div style={{ padding:mobile?"16px 16px 80px":"24px" }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+        <div style={{ fontSize:mobile?18:22, fontWeight:800, color:C.white, fontFamily:"Georgia,serif" }}>Projects</div>
+        <button onClick={()=>setShowProjectModal(true)} style={{ ...btn("primary"), padding:"8px 16px", fontSize:13 }}>+ New Project</button>
+      </div>
+
+      {projects.length === 0 ? (
+        <div style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:32, textAlign:"center" }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>📁</div>
+          <div style={{ fontSize:16, fontWeight:700, color:C.text, marginBottom:8 }}>No projects yet</div>
+          <div style={{ fontSize:13, color:C.muted, marginBottom:20 }}>Create a project for each client — share invite link so they see only their content</div>
+          <button onClick={()=>setShowProjectModal(true)} style={{ ...btn("primary") }}>Create First Project</button>
+        </div>
+      ) : projects.map(proj => {
+        const projPosts = posts.filter(p => p.project_id === proj.id);
+        const projTasks = tasks.filter(t => t.project_id === proj.id);
+        const doneTasks = projTasks.filter(t => t.status === "posted").length;
+        const burningTasks = projTasks.filter(t => urgency(t) === "burning").length;
+        return (
+          <div key={proj.id} style={{ background:"#0f0f2e", border:`1px solid #1a1a4a`, borderRadius:14, padding:"16px", marginBottom:12 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+              <div onClick={()=>{ setActiveProjectId(proj.id); setView("dash"); }} style={{ flex:1, cursor:"pointer" }}>
+                <div style={{ fontWeight:800, fontSize:16, color:C.white, fontFamily:"Georgia,serif" }}>{proj.name}</div>
+                {proj.client && <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>{proj.client}</div>}
+                <div style={{ fontSize:11, color:"#444466", marginTop:2 }}>Created {fmtDate(proj.created_at)}</div>
+              </div>
+              <button onClick={()=>{ if(window.confirm(`Delete project "${proj.name}"?`)) deleteProject(proj.id); }} style={{ ...btn("danger"), padding:"4px 10px", fontSize:11 }}>Delete</button>
+            </div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:12 }}>
+              {[{n:projPosts.length,l:"Posts",c:C.violet2},{n:doneTasks,l:"Done",c:C.green},{n:burningTasks,l:"Burning",c:burningTasks?C.red:C.muted}].map((s,i)=>(
+                <div key={i} style={{ background:"#0a0a1e", borderRadius:10, padding:"10px 12px", textAlign:"center" }}>
+                  <div style={{ fontSize:20, fontWeight:800, color:s.c, fontFamily:"Georgia,serif" }}>{s.n}</div>
+                  <div style={{ fontSize:10, color:C.muted }}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button onClick={()=>{ setActiveProjectId(proj.id); setView("dash"); }} style={{ ...btn("primary"), flex:1, padding:"8px", fontSize:12 }}>
+                Open Project
+              </button>
+              <button onClick={()=>{
+                const link = getProjectInviteLink(proj.id);
+                navigator.clipboard.writeText(link).then(()=>notify(`Invite link for "${proj.name}" copied ✓`)).catch(()=>notify(link));
+              }} style={{ ...btn("gold"), flex:1, padding:"8px", fontSize:12 }}>
+                🔗 Copy Invite Link
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // ── CONTENT PLAN VIEW ─────────────────────────────────────────────────────
   // ── EXTRACT TEXT FROM PDF ────────────────────────────────────────────────
   const extractPdfText = async (file) => {
@@ -1073,7 +1130,7 @@ Output ONLY a JSON array:
         <span style={{ fontSize:18, fontWeight:800, letterSpacing:2, fontFamily:"Georgia,serif", color:C.white }}>TASKONA<span style={{ color:C.violet }}>.AI</span></span>
       </div>
       <nav style={{ display:"flex", gap:3 }}>
-        {[["dash","Dashboard"],["week","This Week"],["plan","Content Plan"],["er","ER Analytics"],["add","+ Add Post"]].map(([k,l])=>(
+        {[["dash","Dashboard"],["week","This Week"],["projects","Projects"],["plan","Content Plan"],["er","ER Analytics"],["add","+ Add Post"]].map(([k,l])=>(
           <button key={k} onClick={()=>setView(k)} style={{ padding:"6px 14px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:view===k?C.violet:"transparent", color:view===k?C.white:C.muted }}>
             {l}
           </button>
@@ -1094,12 +1151,11 @@ Output ONLY a JSON array:
   const MobileNav = () => (
     <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"#0d0d2b", borderTop:`1px solid #1a1a4a`, display:"flex", zIndex:100 }}>
       {[
-        {key:"dash", icon:"⊞", label:"Home"},
-        {key:"week", icon:"📆", label:"Week"},
-        {key:"plan", icon:"📋", label:"Plan"},
-        {key:"er",   icon:"📊", label:"ER"},
-        {key:"add",  icon:"+",  label:"Add"},
-        {key:"invite", icon:"🔗", label:"Invite"}
+        {key:"dash",     icon:"⊞", label:"Home"},
+        {key:"week",     icon:"📆", label:"Week"},
+        {key:"projects", icon:"📁", label:"Projects"},
+        {key:"plan",     icon:"📋", label:"Plan"},
+        {key:"add",      icon:"+",  label:"Add"}
       ].map(n=>(
         <button key={n.key} onClick={()=>{
           if (n.key==="invite") {
@@ -1130,6 +1186,7 @@ Output ONLY a JSON array:
       {view==="add"    && AddPost()}
       {view==="detail" && Detail()}
       {view==="plan"   && ContentPlanView()}
+      {view==="projects" && ProjectsView()}
       {view==="er"     && ERAnalytics()}
 
       {mobile && <MobileNav/>}
